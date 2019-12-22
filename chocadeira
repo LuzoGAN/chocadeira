@@ -1,0 +1,221 @@
+#include <Fuzzy.h>
+#include <FuzzyComposition.h>
+#include <FuzzyInput.h>
+#include <FuzzyIO.h>
+#include <FuzzyOutput.h>
+#include <FuzzyRule.h>
+#include <FuzzyRuleAntecedent.h>
+#include <FuzzyRuleConsequent.h>
+#include <FuzzySet.h>
+#include <dht.h>
+#include <LiquidCrystal.h> //Carrega a biblioteca LiquidCrystal nativa na IDE
+
+//
+const int sensor_temp = A0;     // pino de leitura digital do sensor
+const int rele1 =  22; // pino de comando do modulo rele resistencia
+const int rele2 =  23; // pino de comando do modulo rele motor
+const int rele3 =  24; // pino de comando do modulo rele ventilador
+//
+
+#define dht_dpin A0 //na porta Analogica A0
+#define dht_dpin1 A1
+dht DHT;
+
+uint32_t timer = 0;
+
+//Define os pinos que serão utilizados para ligação ao display
+LiquidCrystal lcd(12, 11, 5, 4, 3, 2);
+
+Fuzzy*fuzzy = new Fuzzy();
+
+void setup() {
+//
+  pinMode(rele1, OUTPUT);
+  pinMode(rele2, OUTPUT);
+  pinMode(rele3, OUTPUT);
+  pinMode(sensor_temp, INPUT);
+
+//
+  
+  Serial.begin(9600);
+  lcd.begin(20, 2); // Define o display com 16 colunas e 2 linhas
+  lcd.clear(); // limpa a tela do display
+
+  //Criando o FuzzyInput temperatura
+  FuzzyInput* temperatura = new FuzzyInput(1);
+  FuzzySet* baixa = new FuzzySet(0, 0, 32, 37);
+  temperatura->addFuzzySet(baixa);
+  FuzzySet* media = new FuzzySet(31.5, 37.5, 37.5, 38.5);
+  temperatura->addFuzzySet(media);
+  FuzzySet* alta = new FuzzySet(38, 40, 40, 40);
+  temperatura->addFuzzySet(alta);
+  fuzzy->addFuzzyInput(temperatura);
+
+  //Criando o FuzzyInput umidade
+  FuzzyInput* umidade = new FuzzyInput(2);
+  FuzzySet* pouca = new FuzzySet(30, 30, 40, 60);
+  umidade->addFuzzySet(pouca);
+  FuzzySet* normal = new FuzzySet(50, 70, 70, 80);
+  umidade->addFuzzySet(normal);
+  FuzzySet* muita = new FuzzySet(70, 80, 90, 90); umidade->addFuzzySet(muita);
+  fuzzy->addFuzzyInput(umidade);
+
+  //Criando o FuzzyOutput cooler
+  FuzzyOutput* cooler = new FuzzyOutput(1);
+  FuzzySet* desligado = new FuzzySet(40, 40, 60, 80);
+  cooler->addFuzzySet(desligado);
+  FuzzySet* devagar = new FuzzySet(70, 90, 90, 110);
+  cooler->addFuzzySet(devagar);
+  FuzzySet* rapido = new FuzzySet(100, 120, 140, 140);
+  cooler->addFuzzySet(rapido);
+  fuzzy->addFuzzyOutput(cooler);
+
+  //Criando o FuzzyOutput aquecedor
+  FuzzyOutput* aquecedor = new FuzzyOutput(2);
+  FuzzySet* apagada = new FuzzySet(0, 0, 32, 37);
+  aquecedor->addFuzzySet(apagada);
+  FuzzySet* acesa1 = new FuzzySet(31.5, 37.5, 37.5, 38.5);
+  aquecedor->addFuzzySet(acesa1);
+  FuzzySet* acesa2 = new FuzzySet(38, 40, 40, 40);
+  aquecedor->addFuzzySet(acesa2);
+  fuzzy->addFuzzyOutput(aquecedor);
+
+  // Montando as regras Fuzzy
+  // FuzzyRule "SE temperatura = baixa ENTAO aquecedor = acesa2 E cooler = desligado"
+  FuzzyRuleAntecedent*ifTemperaturaBaixa = new FuzzyRuleAntecedent();
+  ifTemperaturaBaixa->joinSingle(baixa);
+  FuzzyRuleConsequent*thenAquecedorAcesa2AndCoolerDesligado = new FuzzyRuleConsequent();
+  thenAquecedorAcesa2AndCoolerDesligado->addOutput(acesa2);
+  thenAquecedorAcesa2AndCoolerDesligado->addOutput(desligado);
+  FuzzyRule*fuzzyRule01 = new FuzzyRule(1, ifTemperaturaBaixa, thenAquecedorAcesa2AndCoolerDesligado);
+  fuzzy->addFuzzyRule(fuzzyRule01);
+
+  // FuzzyRule "SE temperatura = media ENTAO aquecedor = acesa1 E cooler = devagar"
+  FuzzyRuleAntecedent*ifTemperaturaMedia = new FuzzyRuleAntecedent();
+  ifTemperaturaMedia->joinSingle(media);
+  FuzzyRuleConsequent*thenAquecedorAcesa1AndCoolerDesligado = new FuzzyRuleConsequent();
+  thenAquecedorAcesa1AndCoolerDesligado->addOutput(acesa1);
+  thenAquecedorAcesa1AndCoolerDesligado->addOutput(desligado);
+  FuzzyRule*fuzzyRule02 = new FuzzyRule(2, ifTemperaturaMedia, thenAquecedorAcesa1AndCoolerDesligado);
+  fuzzy->addFuzzyRule(fuzzyRule02);
+
+  // FuzzyRule "SE temperatura = alta ENTAO aquecedor = apagada E cooler = devagar"
+  FuzzyRuleAntecedent*ifTemperaturaAlta = new FuzzyRuleAntecedent();
+  ifTemperaturaAlta->joinSingle(media);
+  FuzzyRuleConsequent*thenAquecedorApagadaAndCoolerDevagar = new FuzzyRuleConsequent();
+  thenAquecedorApagadaAndCoolerDevagar->addOutput(apagada);
+  thenAquecedorApagadaAndCoolerDevagar->addOutput(devagar);
+  FuzzyRule*fuzzyRule03 = new FuzzyRule(3, ifTemperaturaAlta, thenAquecedorApagadaAndCoolerDevagar);
+  fuzzy->addFuzzyRule(fuzzyRule03);
+
+  
+}
+void loop() {
+//rele
+  int leitura = digitalRead(sensor_temp);
+
+
+//rele
+
+  
+  // Executa 1 vez a cada 2 segundos
+  if (millis() - timer >= 2000)
+
+    DHT.read11(A1); // chama método de leitura da classe dht,
+  DHT.read11(A0);
+  // com o pino de transmissão de dados ligado no pino A1
+
+  // Exibe na serial o valor de umidade
+  Serial.print("Umi. Ambiente = ");
+  Serial.print(DHT.humidity);
+  Serial.print(" %  ");
+
+  // Exibe na serial o valor da temperatura
+  Serial.print("Temp. Ambiente = ");
+  Serial.print(DHT.temperature);
+  Serial.println(" C  ");
+
+  // Exibe no display LCD o valor da humidade
+  lcd.setCursor(0, 0); // Define o cursor na posição de início
+  lcd.print("Humd. Amb. = ");
+  lcd.print(DHT.humidity);
+  lcd.print("%");
+
+  // Exibe no display LCD o valor da temperatura
+  lcd.setCursor(0, 1); // Define o cursor na posição de início
+  lcd.print("Temp. Amb. = ");
+  lcd.print(DHT.temperature);
+  lcd.write(B11011111); // Imprime o símbolo de grau
+  lcd.print("C");
+
+
+  delay(2000);
+
+
+
+  // Exibe no display LCD o valor da humidade
+  lcd.setCursor(0, 0); // Define o cursor na posição de início
+  lcd.print("Humd. Ovo = ");
+  lcd.print(DHT.humidity);
+  lcd.print("%");
+
+  // Exibe no display LCD o valor da temperatura
+  lcd.setCursor(0, 1); // Define o cursor na posição de início
+  lcd.print("Temp. Ovo. = ");
+  lcd.print(DHT.temperature);
+  lcd.write(B11011111); // Imprime o símbolo de grau
+  lcd.print("C");
+
+
+  
+
+  timer = millis(); // Atualiza a referência
+
+
+
+
+
+
+  DHT.read11(dht_dpin);
+  DHT.read11(dht_dpin1);
+  float t = DHT.temperature;
+  float h = DHT.humidity;
+
+
+  float t1 = DHT.temperature;
+  float h1 = DHT.humidity;
+
+
+  fuzzy->setInput(1, t);
+  fuzzy->setInput(2, h);
+  fuzzy->fuzzify();
+  float output1 = fuzzy->defuzzify(1);
+  float output2 = fuzzy->defuzzify(2);
+  float output3 = fuzzy->defuzzify(3);
+
+  analogWrite(2, output1);
+  analogWrite(3, output2);
+  analogWrite(4, output3);
+  Serial.print(t);
+  Serial.print(",");
+  Serial.print(h);
+  Serial.print(",");
+  Serial.print(output1);
+  Serial.print(",");
+  Serial.print(output2);
+  Serial.print(",");
+  Serial.println(output3);
+
+
+  Serial.print(t1);
+  Serial.print(",");
+  Serial.print(h1);
+  Serial.print(",");
+  Serial.print(output1);
+  Serial.print(",");
+  Serial.print(output2);
+  Serial.print(",");
+  Serial.println(output3);
+
+  delay(30000);
+}
